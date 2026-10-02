@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PCB Tape Jig</title>
+  <meta name="description" content="Turn a KiCad copper-layer DXF into a 3D-printable board for copper-tape circuits.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='2' y='20' width='28' height='8' rx='1' fill='%23c8742c'/><rect x='6' y='8' width='5' height='12' fill='%23e8a15a'/><rect x='14' y='12' width='12' height='8' fill='%23e8a15a'/></svg>">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+        "manifold-3d": "https://cdn.jsdelivr.net/npm/manifold-3d@3.5.4/manifold.js"
+      }
+    }
+  </script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>PCB Tape Jig</h1>
+    <p>Drop in a copper-layer DXF and get a printable board: traces raised for copper tape, a plate underneath, and drill holes cut through.</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel" aria-label="Settings">
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".dxf" hidden>
+        <span class="drop-title" id="drop-title">Choose a .dxf file</span>
+        <span class="drop-hint" id="drop-hint">or drag it here</span>
+      </label>
+
+      <fieldset>
+        <legend>Dimensions (mm)</legend>
+        <label class="field">Trace height
+          <input type="number" id="traceHeight" value="2" min="0.2" step="0.1">
+        </label>
+        <label class="field">Plate thickness
+          <input type="number" id="baseThickness" value="1" min="0.2" step="0.1">
+        </label>
+        <label class="field">Plate margin
+          <input type="number" id="margin" value="3" min="0" step="0.5">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Options</legend>
+        <label class="check">
+          <input type="checkbox" id="cutHoles" checked>
+          <span>Cut drill holes<small>DXF circles go through the traces and plate</small></span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="flip" checked>
+          <span>Mirror for component side<small>Layout reads correctly from the plate side, where parts go in</small></span>
+        </label>
+      </fieldset>
+
+      <button id="download" class="primary" disabled>Download STL</button>
+      <p class="status" id="status" role="status">Loading geometry engine…</p>
+      <dl class="stats" id="stats" hidden></dl>
+    </section>
+
+    <section class="viewer" aria-label="3D preview">
+      <div id="canvas-host"></div>
+      <p class="viewer-empty" id="viewer-empty">Your model will appear here</p>
+      <p class="viewer-hint">Drag to orbit · scroll to zoom · right-drag to pan</p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <details>
+      <summary>How to export the DXF from KiCad</summary>
+      <ol>
+        <li>In the PCB editor, open <b>File → Plot</b>.</li>
+        <li>Set the format to <b>DXF</b> and tick only the copper layer you want (e.g. <b>F.Cu</b>).</li>
+        <li>Leave <b>Plot graphic items using their contours</b> on, units in millimetres, and set the drill marks to <b>Actual size</b> to get holes.</li>
+        <li>Click <b>Plot</b> and drop the resulting <code>…-F_Cu.dxf</code> here.</li>
+      </ol>
+    </details>
+    <p>Everything runs in your browser; your file is never uploaded.</p>
+  </footer>
+</body>
+</html>

@@ -10,7 +10,7 @@ const ui = {
   traceHeight: $("traceHeight"), baseThickness: $("baseThickness"), margin: $("margin"),
   cutHoles: $("cutHoles"), flip: $("flip"),
   download: $("download"), status: $("status"), stats: $("stats"),
-  host: $("canvas-host"), empty: $("viewer-empty"),
+  host: $("canvas-host"), empty: $("viewer-empty"), plateHint: $("plate-hint"),
 };
 
 let wasm = null;
@@ -100,6 +100,12 @@ function showMesh({ positions, indices }, plateTop, refit) {
 }
 
 // ---------- model building ----------
+const plateShape = () => document.querySelector('input[name="plateShape"]:checked').value;
+const PLATE_HINTS = {
+  rectangle: "A solid rectangle under everything, extending past the copper by the margin.",
+  outline: "The plate hugs the traces, extending past them by the margin.",
+};
+
 function readOptions() {
   const n = (el, min) => Math.max(min, parseFloat(el.value) || 0);
   return {
@@ -108,6 +114,7 @@ function readOptions() {
     margin: n(ui.margin, 0),
     cutHoles: ui.cutHoles.checked,
     flip: ui.flip.checked,
+    plateShape: plateShape(),
   };
 }
 
@@ -137,9 +144,12 @@ function rebuild(refit = false) {
     showMesh(lastResult.mesh, opts.baseThickness, refit);
     renderStats(lastResult.stats);
     ui.download.disabled = false;
-    const warn = lastResult.stats.openChains
+    let warn = lastResult.stats.openChains
       ? ` ${lastResult.stats.openChains} open path(s) were skipped.`
       : "";
+    if (lastResult.stats.platePieces > 1) {
+      warn += ` The plate is in ${lastResult.stats.platePieces} separate pieces; raise the margin to join them.`;
+    }
     setStatus(`Built in ${ms} ms.${warn}`);
   } catch (err) {
     console.error(err);
@@ -156,6 +166,12 @@ const scheduleRebuild = () => {
 };
 for (const el of [ui.traceHeight, ui.baseThickness, ui.margin]) el.addEventListener("input", scheduleRebuild);
 for (const el of [ui.cutHoles, ui.flip]) el.addEventListener("change", () => rebuild(false));
+for (const el of document.querySelectorAll('input[name="plateShape"]')) {
+  el.addEventListener("change", () => {
+    ui.plateHint.textContent = PLATE_HINTS[plateShape()];
+    rebuild(false);
+  });
+}
 
 // ---------- file input ----------
 async function loadFile(file) {

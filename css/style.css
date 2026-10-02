@@ -104,6 +104,29 @@ legend { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter
 }
 .field input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.segmented label { position: relative; cursor: pointer; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented span {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.segmented input:checked + span { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hint { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
+
 .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .check input { margin-top: 4px; accent-color: var(--accent); }
 .check small { display: block; color: var(--muted); font-size: 0.82rem; line-height: 1.35; }

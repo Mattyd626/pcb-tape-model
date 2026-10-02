@@ -163,7 +163,9 @@ export function chainLoops(paths, tolerance = 1e-4) {
   const loops = [];
   const pieces = [];
 
-  for (const p of paths) {
+  for (const raw of paths) {
+    // Drop repeated points (KiCad writes zero-length LINEs) so outlines never revisit a vertex.
+    const p = raw.filter((pt, i) => i === 0 || key(pt) !== key(raw[i - 1]));
     if (p.length < 2) continue;
     if (key(p[0]) === key(p[p.length - 1]) && p.length > 3) loops.push(p.slice(0, -1));
     else pieces.push(p);

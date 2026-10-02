@@ -1,15 +1,18 @@
 // Build the copper-tape PCB jig from parsed DXF geometry using manifold-3d.
 import { chainLoops, circlePoints } from "./dxf.js";
 
+const SIMPLIFY = 0.002; // mm
+
 /**
  * @param wasm      initialised manifold-3d module (after setup())
  * @param dxf       result of parseDxf()
- * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip }
+ * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip, plateShape }
+ *                  plateShape: "rectangle" (default) or "outline" (plate follows the traces)
  * @returns { mesh: {positions: Float32Array, indices: Uint32Array}, stats }
  */
 export function buildModel(wasm, dxf, opts) {
   const { CrossSection } = wasm;
-  const { traceHeight, baseThickness, margin, cutHoles, flip } = opts;
+  const { traceHeight, baseThickness, margin, cutHoles, flip, plateShape = "rectangle" } = opts;
   const trash = [];
   const keep = (obj) => (trash.push(obj), obj);
 
@@ -30,19 +33,47 @@ export function buildModel(wasm, dxf, opts) {
       if (holes) holes = keep(holes.mirror([1, 0]));
     }
 
-    // Move to origin with the margin, so it drops straight onto a print bed.
-    const b = copper.bounds();
-    const shift = [margin - b.min[0], margin - b.min[1]];
-    copper = keep(copper.translate(shift));
-    if (holes) holes = keep(holes.translate(shift));
-    const width = b.max[0] - b.min[0] + 2 * margin;
-    const depth = b.max[1] - b.min[1] + 2 * margin;
+    // The plate is either the bounding rectangle or the copper grown by the margin.
+    let base;
+    if (plateShape === "outline") {
+      let grown = margin > 0 ? keep(copper.offset(margin, "Round", 2, 48)) : copper;
+      base = keep(keep(fillGaps(CrossSection, grown)).simplify(SIMPLIFY));
+    } else {
+      const b = copper.bounds();
+      base = keep(keep(CrossSection.square([b.max[0] - b.min[0] + 2 * margin, b.max[1] - b.min[1] + 2 * margin]))
+        .translate([b.min[0] - margin, b.min[1] - margin]));
+    }
+    const pieces = base.decompose();
+    const platePieces = pieces.length;
+    for (const piece of pieces) piece.delete();
 
-    let base = keep(CrossSection.square([width, depth]));
+    let holeCount = holes ? dxf.circles.length : 0;
+    if (holes && plateShape === "outline") {
+      // Only cut holes that sit fully inside the plate. One that straddles the
+      // plate edge (a pin with no copper) would just be a notch, and an exactly
+      // tangent one would pinch the plate.
+      const inside = dxf.circles.filter((c) => {
+        const disk = keep(keep(CrossSection.circle(c.r + 0.05, 32)).translate([flip ? -c.x : c.x, c.y]));
+        return keep(disk.subtract(base)).area() < 1e-6;
+      });
+      holeCount = inside.length;
+      holes = inside.length ? keep(new CrossSection(inside.map((c) => circlePoints(flip ? -c.x : c.x, c.y, c.r)), "NonZero")) : null;
+    }
     if (holes) {
       copper = keep(copper.subtract(holes));
       base = keep(base.subtract(holes));
     }
+    // Drop vertices closer together than float32 STL precision can separate.
+    copper = keep(copper.simplify(SIMPLIFY));
+    base = keep(base.simplify(SIMPLIFY));
+
+    // Move to the origin so it drops straight onto a print bed.
+    const pb = base.bounds();
+    const shift = [-pb.min[0], -pb.min[1]];
+    copper = keep(copper.translate(shift));
+    base = keep(base.translate(shift));
+    const width = pb.max[0] - pb.min[0];
+    const depth = pb.max[1] - pb.min[1];
 
     const copperArea = copper.area();
     const baseSolid = keep(base.extrude(baseThickness));
@@ -64,8 +95,9 @@ export function buildModel(wasm, dxf, opts) {
       stats: {
         loops: loops.length,
         openChains,
-        holes: holes ? dxf.circles.length : 0,
+        holes: holeCount,
         copperArea,
+        platePieces,
         size: [width, depth, baseThickness + traceHeight],
         triangles: indices.length / 3,
         genus: solid.genus(),
@@ -75,6 +107,23 @@ export function buildModel(wasm, dxf, opts) {
   } finally {
     for (const obj of trash) obj.delete();
   }
+}
+
+/**
+ * Keep only the outer boundaries of a cross-section, filling every enclosed gap.
+ * Gaps between traces can shrink to a point at some margins, which would pinch
+ * the plate; drill holes are cut afterwards anyway.
+ */
+function fillGaps(CrossSection, section) {
+  const signedArea = (ring) => {
+    let a = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    }
+    return a / 2;
+  };
+  const outers = section.toPolygons().filter((ring) => signedArea(ring) > 0);
+  return new CrossSection(outers, "Positive");
 }
 
 /** Encode an indexed triangle mesh as a binary STL. */

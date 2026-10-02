@@ -46,6 +46,15 @@
       </fieldset>
 
       <fieldset>
+        <legend>Plate shape</legend>
+        <div class="segmented" role="radiogroup" aria-label="Plate shape">
+          <label><input type="radio" name="plateShape" value="rectangle" checked><span>Rectangle</span></label>
+          <label><input type="radio" name="plateShape" value="outline"><span>Follow traces</span></label>
+        </div>
+        <p class="hint" id="plate-hint">A solid rectangle under everything, extending past the copper by the margin.</p>
+      </fieldset>
+
+      <fieldset>
         <legend>Options</legend>
         <label class="check">
           <input type="checkbox" id="cutHoles" checked>

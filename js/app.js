@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   drop: $("drop"), file: $("file"), dropTitle: $("drop-title"), dropHint: $("drop-hint"),
   traceHeight: $("traceHeight"), baseThickness: $("baseThickness"), margin: $("margin"),
-  holeDiameter: $("holeDiameter"), padDiameter: $("padDiameter"),
+  holeDiameter: $("holeDiameter"), padDiameter: $("padDiameter"), widen: $("widen"),
   cutHoles: $("cutHoles"), flip: $("flip"),
   download: $("download"), status: $("status"), stats: $("stats"),
   host: $("canvas-host"), empty: $("viewer-empty"), plateHint: $("plate-hint"),
@@ -118,6 +118,7 @@ function readOptions() {
     traceHeight: n(ui.traceHeight, 0.05),
     baseThickness: n(ui.baseThickness, 0.05),
     margin: n(ui.margin, 0),
+    widen: n(ui.widen, 0),
     holeDiameter: optional(ui.holeDiameter, 0.2),
     padDiameter: optional(ui.padDiameter, 0.5),
     cutHoles: ui.cutHoles.checked,
@@ -155,8 +156,8 @@ function rebuild(refit = false) {
     let warn = lastResult.stats.openChains
       ? ` ${lastResult.stats.openChains} open path(s) were skipped.`
       : "";
-    if (lastResult.stats.padMerges > 0) {
-      warn += ` Pads now touch neighbouring copper in ${lastResult.stats.padMerges} place(s); use a smaller pad.`;
+    if (lastResult.stats.shorts > 0) {
+      warn += ` Copper now touches neighbouring copper in ${lastResult.stats.shorts} place(s); reduce the trace widening or pad size.`;
     }
     if (opts.padDiameter && opts.holeDiameter && opts.padDiameter <= opts.holeDiameter) {
       warn += " The pad is no bigger than the hole, so there's no copper ring.";
@@ -178,7 +179,7 @@ const scheduleRebuild = () => {
   clearTimeout(rebuildTimer);
   rebuildTimer = setTimeout(() => rebuild(false), 200);
 };
-for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.holeDiameter, ui.padDiameter]) {
+for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.widen, ui.holeDiameter, ui.padDiameter]) {
   el.addEventListener("input", scheduleRebuild);
 }
 for (const el of [ui.cutHoles, ui.flip]) el.addEventListener("change", () => rebuild(false));

@@ -6,14 +6,15 @@ const SIMPLIFY = 0.002; // mm
 /**
  * @param wasm      initialised manifold-3d module (after setup())
  * @param dxf       result of parseDxf()
- * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip, plateShape, holeDiameter, padDiameter }
+ * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip, plateShape, holeDiameter, padDiameter, widen }
  *                  plateShape: "rectangle" (default) or "outline" (plate follows the traces)
  *                  holeDiameter / padDiameter: mm, or null to keep the sizes from the DXF
+ *                  widen: mm added to the width of every trace and pad (half on each side)
  * @returns { mesh: {positions: Float32Array, indices: Uint32Array}, stats }
  */
 export function buildModel(wasm, dxf, opts) {
   const { CrossSection } = wasm;
-  const { traceHeight, baseThickness, margin, cutHoles, flip, plateShape = "rectangle", holeDiameter = null, padDiameter = null } = opts;
+  const { traceHeight, baseThickness, margin, cutHoles, flip, plateShape = "rectangle", holeDiameter = null, padDiameter = null, widen = 0 } = opts;
   const trash = [];
   const keep = (obj) => (trash.push(obj), obj);
 
@@ -38,18 +39,23 @@ export function buildModel(wasm, dxf, opts) {
       d.touchesCopper = keep(disk(d.x, d.y, dxf.circles[i].r).intersect(copper)).area() > 1e-6;
     }
 
+    const piecesBefore = countPieces(copper);
+
+    // Optional widening: grow every trace and pad outward by half the amount on each side.
+    // The tiny extra keeps grid-aligned gaps from closing to an exact point, which
+    // would pinch the copper into a non-manifold shape.
+    if (widen > 0) copper = keep(copper.offset(widen / 2 + 0.0013, "Round", 2, 48));
+
     // Optional round pads around every hole that is already part of the copper.
-    let padMerges = 0;
     if (padDiameter) {
       const padded = drills.filter((d) => d.touchesCopper);
       if (padded.length) {
-        const before = countPieces(copper);
         const pads = keep(new CrossSection(padded.map((d) => circlePoints(d.x, d.y, padDiameter / 2)), "NonZero"));
         copper = keep(copper.add(pads));
-        // Fewer separate copper areas than before means a pad bridged two nets.
-        padMerges = Math.max(0, before - countPieces(copper));
       }
     }
+    // Fewer separate copper areas than before means widening or pads bridged two nets.
+    const shorts = Math.max(0, piecesBefore - countPieces(copper));
 
     let holes = null;
     if (cutHoles && drills.length) {
@@ -116,7 +122,7 @@ export function buildModel(wasm, dxf, opts) {
         holes: holeCount,
         copperArea,
         platePieces,
-        padMerges,
+        shorts,
         size: [width, depth, baseThickness + traceHeight],
         triangles: indices.length / 3,
         genus: solid.genus(),

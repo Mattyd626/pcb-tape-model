@@ -46,6 +46,17 @@
       </fieldset>
 
       <fieldset>
+        <legend>Holes &amp; pads (mm)</legend>
+        <label class="field">Hole diameter
+          <input type="number" id="holeDiameter" placeholder="DXF" min="0.2" step="0.1">
+        </label>
+        <label class="field">Pad diameter
+          <input type="number" id="padDiameter" placeholder="DXF" min="0.5" step="0.1">
+        </label>
+        <p class="hint">Leave blank to keep the DXF sizes. A pad size adds a round pad around every hole that's already on a trace (it can enlarge pads, not shrink them).</p>
+      </fieldset>
+
+      <fieldset>
         <legend>Plate shape</legend>
         <div class="segmented" role="radiogroup" aria-label="Plate shape">
           <label><input type="radio" name="plateShape" value="rectangle" checked><span>Rectangle</span></label>

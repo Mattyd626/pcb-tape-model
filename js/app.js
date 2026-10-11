@@ -8,6 +8,7 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   drop: $("drop"), file: $("file"), dropTitle: $("drop-title"), dropHint: $("drop-hint"),
   traceHeight: $("traceHeight"), baseThickness: $("baseThickness"), margin: $("margin"),
+  holeDiameter: $("holeDiameter"), padDiameter: $("padDiameter"),
   cutHoles: $("cutHoles"), flip: $("flip"),
   download: $("download"), status: $("status"), stats: $("stats"),
   host: $("canvas-host"), empty: $("viewer-empty"), plateHint: $("plate-hint"),
@@ -108,10 +109,17 @@ const PLATE_HINTS = {
 
 function readOptions() {
   const n = (el, min) => Math.max(min, parseFloat(el.value) || 0);
+  // Blank (or invalid) means "use the size from the DXF".
+  const optional = (el, min) => {
+    const v = parseFloat(el.value);
+    return Number.isFinite(v) && v > 0 ? Math.max(min, v) : null;
+  };
   return {
     traceHeight: n(ui.traceHeight, 0.05),
     baseThickness: n(ui.baseThickness, 0.05),
     margin: n(ui.margin, 0),
+    holeDiameter: optional(ui.holeDiameter, 0.2),
+    padDiameter: optional(ui.padDiameter, 0.5),
     cutHoles: ui.cutHoles.checked,
     flip: ui.flip.checked,
     plateShape: plateShape(),
@@ -147,6 +155,12 @@ function rebuild(refit = false) {
     let warn = lastResult.stats.openChains
       ? ` ${lastResult.stats.openChains} open path(s) were skipped.`
       : "";
+    if (lastResult.stats.padMerges > 0) {
+      warn += ` Pads now touch neighbouring copper in ${lastResult.stats.padMerges} place(s); use a smaller pad.`;
+    }
+    if (opts.padDiameter && opts.holeDiameter && opts.padDiameter <= opts.holeDiameter) {
+      warn += " The pad is no bigger than the hole, so there's no copper ring.";
+    }
     if (lastResult.stats.platePieces > 1) {
       warn += ` The plate is in ${lastResult.stats.platePieces} separate pieces; raise the margin to join them.`;
     }
@@ -164,7 +178,9 @@ const scheduleRebuild = () => {
   clearTimeout(rebuildTimer);
   rebuildTimer = setTimeout(() => rebuild(false), 200);
 };
-for (const el of [ui.traceHeight, ui.baseThickness, ui.margin]) el.addEventListener("input", scheduleRebuild);
+for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.holeDiameter, ui.padDiameter]) {
+  el.addEventListener("input", scheduleRebuild);
+}
 for (const el of [ui.cutHoles, ui.flip]) el.addEventListener("change", () => rebuild(false));
 for (const el of document.querySelectorAll('input[name="plateShape"]')) {
   el.addEventListener("change", () => {

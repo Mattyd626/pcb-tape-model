@@ -6,13 +6,14 @@ const SIMPLIFY = 0.002; // mm
 /**
  * @param wasm      initialised manifold-3d module (after setup())
  * @param dxf       result of parseDxf()
- * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip, plateShape }
+ * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip, plateShape, holeDiameter, padDiameter }
  *                  plateShape: "rectangle" (default) or "outline" (plate follows the traces)
+ *                  holeDiameter / padDiameter: mm, or null to keep the sizes from the DXF
  * @returns { mesh: {positions: Float32Array, indices: Uint32Array}, stats }
  */
 export function buildModel(wasm, dxf, opts) {
   const { CrossSection } = wasm;
-  const { traceHeight, baseThickness, margin, cutHoles, flip, plateShape = "rectangle" } = opts;
+  const { traceHeight, baseThickness, margin, cutHoles, flip, plateShape = "rectangle", holeDiameter = null, padDiameter = null } = opts;
   const trash = [];
   const keep = (obj) => (trash.push(obj), obj);
 
@@ -22,15 +23,37 @@ export function buildModel(wasm, dxf, opts) {
 
     // Even-odd fill: outlines nested inside outlines become cut-outs.
     let copper = keep(new CrossSection(loops, "EvenOdd"));
-    let holes = null;
-    if (cutHoles && dxf.circles.length) {
-      holes = keep(new CrossSection(dxf.circles.map((c) => circlePoints(c.x, c.y, c.r)), "NonZero"));
+    // Mirror so the layout reads correctly from the plate (component) side.
+    if (flip) copper = keep(copper.mirror([1, 0]));
+
+    // Drill positions in the (possibly mirrored) frame, with the chosen hole size.
+    const drills = dxf.circles.map((c) => ({
+      x: flip ? -c.x : c.x,
+      y: c.y,
+      r: holeDiameter ? holeDiameter / 2 : c.r,
+      touchesCopper: false,
+    }));
+    const disk = (x, y, r) => keep(keep(CrossSection.circle(r, 48)).translate([x, y]));
+    for (const [i, d] of drills.entries()) {
+      d.touchesCopper = keep(disk(d.x, d.y, dxf.circles[i].r).intersect(copper)).area() > 1e-6;
     }
 
-    // Mirror so the layout reads correctly from the plate (component) side.
-    if (flip) {
-      copper = keep(copper.mirror([1, 0]));
-      if (holes) holes = keep(holes.mirror([1, 0]));
+    // Optional round pads around every hole that is already part of the copper.
+    let padMerges = 0;
+    if (padDiameter) {
+      const padded = drills.filter((d) => d.touchesCopper);
+      if (padded.length) {
+        const before = countPieces(copper);
+        const pads = keep(new CrossSection(padded.map((d) => circlePoints(d.x, d.y, padDiameter / 2)), "NonZero"));
+        copper = keep(copper.add(pads));
+        // Fewer separate copper areas than before means a pad bridged two nets.
+        padMerges = Math.max(0, before - countPieces(copper));
+      }
+    }
+
+    let holes = null;
+    if (cutHoles && drills.length) {
+      holes = keep(new CrossSection(drills.map((d) => circlePoints(d.x, d.y, d.r)), "NonZero"));
     }
 
     // The plate is either the bounding rectangle or the copper grown by the margin.
@@ -43,21 +66,16 @@ export function buildModel(wasm, dxf, opts) {
       base = keep(keep(CrossSection.square([b.max[0] - b.min[0] + 2 * margin, b.max[1] - b.min[1] + 2 * margin]))
         .translate([b.min[0] - margin, b.min[1] - margin]));
     }
-    const pieces = base.decompose();
-    const platePieces = pieces.length;
-    for (const piece of pieces) piece.delete();
+    const platePieces = countPieces(base);
 
-    let holeCount = holes ? dxf.circles.length : 0;
+    let holeCount = holes ? drills.length : 0;
     if (holes && plateShape === "outline") {
       // Only cut holes that sit fully inside the plate. One that straddles the
       // plate edge (a pin with no copper) would just be a notch, and an exactly
       // tangent one would pinch the plate.
-      const inside = dxf.circles.filter((c) => {
-        const disk = keep(keep(CrossSection.circle(c.r + 0.05, 32)).translate([flip ? -c.x : c.x, c.y]));
-        return keep(disk.subtract(base)).area() < 1e-6;
-      });
+      const inside = drills.filter((d) => keep(disk(d.x, d.y, d.r + 0.05).subtract(base)).area() < 1e-6);
       holeCount = inside.length;
-      holes = inside.length ? keep(new CrossSection(inside.map((c) => circlePoints(flip ? -c.x : c.x, c.y, c.r)), "NonZero")) : null;
+      holes = inside.length ? keep(new CrossSection(inside.map((d) => circlePoints(d.x, d.y, d.r)), "NonZero")) : null;
     }
     if (holes) {
       copper = keep(copper.subtract(holes));
@@ -98,6 +116,7 @@ export function buildModel(wasm, dxf, opts) {
         holes: holeCount,
         copperArea,
         platePieces,
+        padMerges,
         size: [width, depth, baseThickness + traceHeight],
         triangles: indices.length / 3,
         genus: solid.genus(),
@@ -124,6 +143,12 @@ function fillGaps(CrossSection, section) {
   };
   const outers = section.toPolygons().filter((ring) => signedArea(ring) > 0);
   return new CrossSection(outers, "Positive");
+}
+
+function countPieces(section) {
+  const pieces = section.decompose();
+  for (const piece of pieces) piece.delete();
+  return pieces.length;
 }
 
 /** Encode an indexed triangle mesh as a binary STL. */

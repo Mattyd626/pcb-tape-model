@@ -9,7 +9,9 @@ const ui = {
   drop: $("drop"), file: $("file"), dropTitle: $("drop-title"), dropHint: $("drop-hint"),
   traceHeight: $("traceHeight"), baseThickness: $("baseThickness"), margin: $("margin"),
   holeDiameter: $("holeDiameter"), padDiameter: $("padDiameter"), widen: $("widen"),
-  cutHoles: $("cutHoles"), flip: $("flip"),
+  cutHoles: $("cutHoles"), flip: $("flip"), removePads: $("removePads"),
+  stampClearance: $("stampClearance"), stampThickness: $("stampThickness"),
+  stampFields: $("stamp-fields"), outputHint: $("output-hint"),
   download: $("download"), status: $("status"), stats: $("stats"),
   host: $("canvas-host"), empty: $("viewer-empty"), plateHint: $("plate-hint"),
 };
@@ -59,17 +61,22 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-function showMesh({ positions, indices }, plateTop, refit) {
+const PALETTE = {
+  jig: { raised: new THREE.Color(0xd9853b), plate: new THREE.Color(0x8a8f86) },
+  stamp: { raised: new THREE.Color(0x6f8fb0), plate: new THREE.Color(0x7d8590) },
+};
+
+function showMesh({ positions, indices }, plateTop, refit, output = "jig") {
   const indexed = new THREE.BufferGeometry();
   indexed.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   indexed.setIndex(new THREE.BufferAttribute(indices, 1));
   const geo = indexed.toNonIndexed();
   indexed.dispose();
 
-  // Colour each triangle: copper if it rises above the plate, otherwise plate.
+  // Colour each triangle: raised (traces or ribs) if above the plate, otherwise plate.
   const pos = geo.attributes.position.array;
   const colors = new Float32Array(pos.length);
-  const copper = new THREE.Color(0xd9853b), plate = new THREE.Color(0x8a8f86);
+  const { raised: copper, plate } = PALETTE[output];
   for (let t = 0; t < pos.length; t += 9) {
     const maxZ = Math.max(pos[t + 2], pos[t + 5], pos[t + 8]);
     const c = maxZ > plateTop + 1e-3 ? copper : plate;
@@ -102,6 +109,11 @@ function showMesh({ positions, indices }, plateTop, refit) {
 
 // ---------- model building ----------
 const plateShape = () => document.querySelector('input[name="plateShape"]:checked').value;
+const output = () => document.querySelector('input[name="output"]:checked').value;
+const OUTPUT_HINTS = {
+  jig: "The board you lay copper tape on.",
+  stamp: "Lay tape over the whole jig, then press this face-down onto it: the ribs push the tape into the gaps and cut it along every trace edge. Pins through a few holes keep it lined up.",
+};
 const PLATE_HINTS = {
   rectangle: "A solid rectangle under everything, extending past the copper by the margin.",
   outline: "The plate hugs the traces, extending past them by the margin.",
@@ -124,6 +136,10 @@ function readOptions() {
     cutHoles: ui.cutHoles.checked,
     flip: ui.flip.checked,
     plateShape: plateShape(),
+    removePads: ui.removePads.checked,
+    output: output(),
+    stampClearance: n(ui.stampClearance, 0),
+    stampThickness: n(ui.stampThickness, 0.4),
   };
 }
 
@@ -150,7 +166,7 @@ function rebuild(refit = false) {
     const t0 = performance.now();
     lastResult = buildModel(wasm, dxf, opts);
     const ms = Math.round(performance.now() - t0);
-    showMesh(lastResult.mesh, opts.baseThickness, refit);
+    showMesh(lastResult.mesh, lastResult.stats.plateTop, refit, opts.output);
     renderStats(lastResult.stats);
     ui.download.disabled = false;
     let warn = lastResult.stats.openChains
@@ -159,7 +175,7 @@ function rebuild(refit = false) {
     if (lastResult.stats.shorts > 0) {
       warn += ` Copper now touches neighbouring copper in ${lastResult.stats.shorts} place(s); reduce the trace widening or pad size.`;
     }
-    if (opts.padDiameter && opts.holeDiameter && opts.padDiameter <= opts.holeDiameter) {
+    if (opts.padDiameter && opts.holeDiameter && opts.padDiameter <= opts.holeDiameter && !opts.removePads) {
       warn += " The pad is no bigger than the hole, so there's no copper ring.";
     }
     if (lastResult.stats.platePieces > 1) {
@@ -179,10 +195,25 @@ const scheduleRebuild = () => {
   clearTimeout(rebuildTimer);
   rebuildTimer = setTimeout(() => rebuild(false), 200);
 };
-for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.widen, ui.holeDiameter, ui.padDiameter]) {
+for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.widen, ui.holeDiameter, ui.padDiameter,
+  ui.stampClearance, ui.stampThickness]) {
   el.addEventListener("input", scheduleRebuild);
 }
 for (const el of [ui.cutHoles, ui.flip]) el.addEventListener("change", () => rebuild(false));
+ui.removePads.addEventListener("change", () => {
+  // Pad size has no meaning once pads are removed.
+  ui.padDiameter.disabled = ui.removePads.checked;
+  rebuild(false);
+});
+for (const el of document.querySelectorAll('input[name="output"]')) {
+  el.addEventListener("change", () => {
+    const kind = output();
+    ui.outputHint.textContent = OUTPUT_HINTS[kind];
+    ui.stampFields.hidden = kind !== "stamp";
+    ui.download.textContent = `Download ${kind} STL`;
+    rebuild(false);
+  });
+}
 for (const el of document.querySelectorAll('input[name="plateShape"]')) {
   el.addEventListener("change", () => {
     ui.plateHint.textContent = PLATE_HINTS[plateShape()];
@@ -225,7 +256,7 @@ ui.download.addEventListener("click", () => {
   const blob = new Blob([toBinaryStl(lastResult.mesh)], { type: "model/stl" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `${fileName}.stl`;
+  a.download = lastResult.stats.output === "stamp" ? `${fileName}-stamp.stl` : `${fileName}.stl`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });

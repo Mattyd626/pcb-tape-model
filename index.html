@@ -57,6 +57,10 @@
           <input type="number" id="padDiameter" placeholder="DXF" min="0.5" step="0.1">
         </label>
         <p class="hint">Leave blank to keep the DXF sizes. A pad size adds a round pad around every hole that's already on a trace (it can enlarge pads, not shrink them).</p>
+        <label class="check">
+          <input type="checkbox" id="removePads">
+          <span>Remove pads<small>Traces run straight into the holes at their own width, so tape strips lay flat</small></span>
+        </label>
       </fieldset>
 
       <fieldset>
@@ -80,7 +84,24 @@
         </label>
       </fieldset>
 
-      <button id="download" class="primary" disabled>Download STL</button>
+      <fieldset>
+        <legend>Model</legend>
+        <div class="segmented" role="radiogroup" aria-label="Model">
+          <label><input type="radio" name="output" value="jig" checked><span>Jig</span></label>
+          <label><input type="radio" name="output" value="stamp"><span>Stamp</span></label>
+        </div>
+        <p class="hint" id="output-hint">The board you lay copper tape on.</p>
+        <div id="stamp-fields" hidden>
+          <label class="field">Pocket clearance
+            <input type="number" id="stampClearance" value="0.2" min="0" step="0.05">
+          </label>
+          <label class="field">Stamp thickness
+            <input type="number" id="stampThickness" value="2" min="0.4" step="0.2">
+          </label>
+        </div>
+      </fieldset>
+
+      <button id="download" class="primary" disabled>Download jig STL</button>
       <p class="status" id="status" role="status">Loading geometry engine…</p>
       <dl class="stats" id="stats" hidden></dl>
     </section>

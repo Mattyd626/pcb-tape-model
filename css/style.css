@@ -102,6 +102,8 @@ legend { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter
   font: inherit;
   text-align: right;
 }
+.field input:disabled { opacity: 0.45; cursor: not-allowed; }
+#stamp-fields { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .field input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .segmented {

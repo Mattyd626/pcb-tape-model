@@ -7,18 +7,19 @@ const SIMPLIFY = 0.002; // mm
  * @param wasm      initialised manifold-3d module (after setup())
  * @param dxf       result of parseDxf()
  * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip, plateShape, holeDiameter, padDiameter, widen,
- *                    removePads, output, stampClearance, stampThickness }
+ *                    removePads, output, stampClearance, stampThickness, border }
  *                  plateShape: "rectangle" (default) or "outline" (plate follows the traces)
  *                  holeDiameter / padDiameter: mm, or null to keep the sizes from the DXF
  *                  widen: mm added to the width of every trace and pad (half on each side)
  *                  removePads: strip pads so traces run straight into the holes
  *                  output: "jig" (default) or "stamp" (the negative pressed onto the jig to cut tape)
+ *                  border: width of a raised rim around the plate edge for stiffness (0 = none)
  * @returns { mesh: {positions: Float32Array, indices: Uint32Array}, stats }
  */
 export function buildModel(wasm, dxf, opts) {
   const { CrossSection } = wasm;
   const { traceHeight, baseThickness, margin, cutHoles, flip, plateShape = "rectangle", holeDiameter = null, padDiameter = null, widen = 0,
-    removePads = false, output = "jig", stampClearance = 0.2, stampThickness = 2 } = opts;
+    removePads = false, output = "jig", stampClearance = 0.2, stampThickness = 2, border = 0 } = opts;
   const trash = [];
   const keep = (obj) => (trash.push(obj), obj);
 
@@ -81,6 +82,19 @@ export function buildModel(wasm, dxf, opts) {
     }
     const platePieces = countPieces(base);
 
+    // Optional stiffening rim: a band along the plate edge, raised like the traces.
+    // It keeps BORDER_GAP clear of the copper so tape on the rim can't touch a trace.
+    const BORDER_GAP = 0.5;
+    let rim = null;
+    let borderTrimmed = false;
+    if (border > 0) {
+      const join = plateShape === "outline" ? "Round" : "Miter";
+      const band = keep(base.subtract(keep(base.offset(-border, join, 2, 48))));
+      rim = keep(band.subtract(keep(copper.offset(BORDER_GAP, "Round", 2, 48))));
+      borderTrimmed = rim.area() < band.area() - 1e-3;
+      if (rim.isEmpty()) rim = null;
+    }
+
     let cutDrills = cutHoles ? drills : [];
     if (plateShape === "outline") {
       // Only cut holes that sit fully inside the plate. One that straddles the
@@ -97,11 +111,13 @@ export function buildModel(wasm, dxf, opts) {
       // leave the merged solid non-manifold).
       copper = keep(copper.subtract(holesOf(0.02)));
       base = keep(base.subtract(holesOf(0)));
+      if (rim) rim = keep(rim.subtract(holesOf(0.02)));
     }
     // Drop vertices closer together than float32 STL precision can separate.
     copper = keep(copper.simplify(SIMPLIFY));
     base = keep(base.simplify(SIMPLIFY));
     outline = keep(outline.simplify(SIMPLIFY));
+    if (rim) rim = keep(rim.simplify(SIMPLIFY));
 
     // Move to the origin so it drops straight onto a print bed.
     const pb = base.bounds();
@@ -109,16 +125,19 @@ export function buildModel(wasm, dxf, opts) {
     copper = keep(copper.translate(shift));
     base = keep(base.translate(shift));
     outline = keep(outline.translate(shift));
+    if (rim) rim = keep(rim.translate(shift));
     const width = pb.max[0] - pb.min[0];
     const depth = pb.max[1] - pb.min[1];
 
     const copperArea = copper.area();
+    // Everything that stands up from the plate: the traces plus the optional rim.
+    const raised = rim ? keep(copper.add(rim)) : copper;
     let solid, height;
     if (output === "stamp") {
       // The stamp is the negative: ribs everywhere except over the traces, with
       // pockets a little larger than each trace. It is mirrored so it lines up
       // when flipped face-down onto the jig.
-      const pockets = keep(copper.offset(stampClearance, "Round", 2, 48));
+      const pockets = keep(raised.offset(stampClearance, "Round", 2, 48));
       let ribs = keep(outline.subtract(pockets));
       // Same trick as the copper: rib holes a hair larger than the plate's.
       if (cutDrills.length) ribs = keep(ribs.subtract(keep(holesOf(0.02).translate(shift))));
@@ -134,7 +153,7 @@ export function buildModel(wasm, dxf, opts) {
     } else {
       const baseSolid = keep(base.extrude(baseThickness));
       // Start the copper inside the plate so the union has no coplanar faces.
-      const copperSolid = keep(keep(copper.extrude(traceHeight + baseThickness / 2)).translate([0, 0, baseThickness / 2]));
+      const copperSolid = keep(keep(raised.extrude(traceHeight + baseThickness / 2)).translate([0, 0, baseThickness / 2]));
       solid = keep(baseSolid.add(copperSolid));
       height = baseThickness + traceHeight;
     }
@@ -158,6 +177,7 @@ export function buildModel(wasm, dxf, opts) {
         platePieces,
         shorts,
         padsRemoved,
+        borderTrimmed,
         output,
         plateTop: output === "stamp" ? stampThickness : baseThickness,
         size: [width, depth, height],

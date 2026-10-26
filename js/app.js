@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   drop: $("drop"), file: $("file"), dropTitle: $("drop-title"), dropHint: $("drop-hint"),
   traceHeight: $("traceHeight"), baseThickness: $("baseThickness"), margin: $("margin"),
-  holeDiameter: $("holeDiameter"), padDiameter: $("padDiameter"), widen: $("widen"),
+  holeDiameter: $("holeDiameter"), padDiameter: $("padDiameter"), widen: $("widen"), border: $("border"),
   cutHoles: $("cutHoles"), flip: $("flip"), removePads: $("removePads"),
   stampClearance: $("stampClearance"), stampThickness: $("stampThickness"),
   stampFields: $("stamp-fields"), outputHint: $("output-hint"),
@@ -131,6 +131,7 @@ function readOptions() {
     baseThickness: n(ui.baseThickness, 0.05),
     margin: n(ui.margin, 0),
     widen: n(ui.widen, 0),
+    border: n(ui.border, 0),
     holeDiameter: optional(ui.holeDiameter, 0.2),
     padDiameter: optional(ui.padDiameter, 0.5),
     cutHoles: ui.cutHoles.checked,
@@ -178,6 +179,9 @@ function rebuild(refit = false) {
     if (opts.padDiameter && opts.holeDiameter && opts.padDiameter <= opts.holeDiameter && !opts.removePads) {
       warn += " The pad is no bigger than the hole, so there's no copper ring.";
     }
+    if (lastResult.stats.borderTrimmed) {
+      warn += " The border was trimmed where it came within 0.5 mm of a trace; raise the plate margin for a full rim.";
+    }
     if (lastResult.stats.platePieces > 1) {
       warn += ` The plate is in ${lastResult.stats.platePieces} separate pieces; raise the margin to join them.`;
     }
@@ -195,7 +199,7 @@ const scheduleRebuild = () => {
   clearTimeout(rebuildTimer);
   rebuildTimer = setTimeout(() => rebuild(false), 200);
 };
-for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.widen, ui.holeDiameter, ui.padDiameter,
+for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.widen, ui.border, ui.holeDiameter, ui.padDiameter,
   ui.stampClearance, ui.stampThickness]) {
   el.addEventListener("input", scheduleRebuild);
 }

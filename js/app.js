@@ -9,6 +9,7 @@ const ui = {
   drop: $("drop"), file: $("file"), dropTitle: $("drop-title"), dropHint: $("drop-hint"),
   traceHeight: $("traceHeight"), baseThickness: $("baseThickness"), margin: $("margin"),
   holeDiameter: $("holeDiameter"), padDiameter: $("padDiameter"), widen: $("widen"), border: $("border"),
+  borderHeight: $("borderHeight"),
   cutHoles: $("cutHoles"), flip: $("flip"), removePads: $("removePads"),
   stampClearance: $("stampClearance"), stampThickness: $("stampThickness"),
   stampFields: $("stamp-fields"), outputHint: $("output-hint"),
@@ -132,6 +133,7 @@ function readOptions() {
     margin: n(ui.margin, 0),
     widen: n(ui.widen, 0),
     border: n(ui.border, 0),
+    borderHeight: optional(ui.borderHeight, 0.2),
     holeDiameter: optional(ui.holeDiameter, 0.2),
     padDiameter: optional(ui.padDiameter, 0.5),
     cutHoles: ui.cutHoles.checked,
@@ -182,6 +184,9 @@ function rebuild(refit = false) {
     if (lastResult.stats.borderTrimmed) {
       warn += " The border was trimmed where it came within 0.5 mm of a trace; raise the plate margin for a full rim.";
     }
+    if (lastResult.stats.stampTooThin) {
+      warn += " The stamp is too thin for a groove that deep under the tall border; raise the stamp thickness.";
+    }
     if (lastResult.stats.platePieces > 1) {
       warn += ` The plate is in ${lastResult.stats.platePieces} separate pieces; raise the margin to join them.`;
     }
@@ -199,7 +204,7 @@ const scheduleRebuild = () => {
   clearTimeout(rebuildTimer);
   rebuildTimer = setTimeout(() => rebuild(false), 200);
 };
-for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.widen, ui.border, ui.holeDiameter, ui.padDiameter,
+for (const el of [ui.traceHeight, ui.baseThickness, ui.margin, ui.widen, ui.border, ui.borderHeight, ui.holeDiameter, ui.padDiameter,
   ui.stampClearance, ui.stampThickness]) {
   el.addEventListener("input", scheduleRebuild);
 }

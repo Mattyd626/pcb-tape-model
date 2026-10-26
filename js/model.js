@@ -7,19 +7,21 @@ const SIMPLIFY = 0.002; // mm
  * @param wasm      initialised manifold-3d module (after setup())
  * @param dxf       result of parseDxf()
  * @param opts      { traceHeight, baseThickness, margin, cutHoles, flip, plateShape, holeDiameter, padDiameter, widen,
- *                    removePads, output, stampClearance, stampThickness, border }
+ *                    removePads, output, stampClearance, stampThickness, border, borderHeight }
  *                  plateShape: "rectangle" (default) or "outline" (plate follows the traces)
  *                  holeDiameter / padDiameter: mm, or null to keep the sizes from the DXF
  *                  widen: mm added to the width of every trace and pad (half on each side)
  *                  removePads: strip pads so traces run straight into the holes
  *                  output: "jig" (default) or "stamp" (the negative pressed onto the jig to cut tape)
  *                  border: width of a raised rim around the plate edge for stiffness (0 = none)
+ *                  borderHeight: rim height above the plate in mm, or null for the trace height
  * @returns { mesh: {positions: Float32Array, indices: Uint32Array}, stats }
  */
 export function buildModel(wasm, dxf, opts) {
   const { CrossSection } = wasm;
   const { traceHeight, baseThickness, margin, cutHoles, flip, plateShape = "rectangle", holeDiameter = null, padDiameter = null, widen = 0,
-    removePads = false, output = "jig", stampClearance = 0.2, stampThickness = 2, border = 0 } = opts;
+    removePads = false, output = "jig", stampClearance = 0.2, stampThickness = 2, border = 0,
+    borderHeight = null } = opts;
   const trash = [];
   const keep = (obj) => (trash.push(obj), obj);
 
@@ -130,13 +132,18 @@ export function buildModel(wasm, dxf, opts) {
     const depth = pb.max[1] - pb.min[1];
 
     const copperArea = copper.area();
-    // Everything that stands up from the plate: the traces plus the optional rim.
-    const raised = rim ? keep(copper.add(rim)) : copper;
+    // The rim can stand taller than the traces; the stamp then gets a groove for it.
+    const rimHeight = rim ? (borderHeight ?? traceHeight) : 0;
+    const extra = Math.max(0, rimHeight - traceHeight);
+    const MIN_STAMP_FLOOR = 0.4; // plastic left under the stamp's groove
+    let grooveDepth = 0;
+    let stampTooThin = false;
     let solid, height;
     if (output === "stamp") {
-      // The stamp is the negative: ribs everywhere except over the traces, with
-      // pockets a little larger than each trace. It is mirrored so it lines up
+      // The stamp is the negative: ribs everywhere except over the traces (and rim),
+      // with pockets a little larger than each. It is mirrored so it lines up
       // when flipped face-down onto the jig.
+      const raised = rim ? keep(copper.add(rim)) : copper;
       const pockets = keep(raised.offset(stampClearance, "Round", 2, 48));
       let ribs = keep(outline.subtract(pockets));
       // Same trick as the copper: rib holes a hair larger than the plate's.
@@ -146,16 +153,37 @@ export function buildModel(wasm, dxf, opts) {
       const mirror = (cs) => keep(keep(cs.mirror([1, 0])).translate([width, 0]));
       ribs = mirror(ribs);
       plate = mirror(plate);
-      const plateSolid = keep(plate.extrude(stampThickness));
+      // A rim taller than the traces would hit the stamp's plate, so sink a groove
+      // for it. The groove sits just inside the rim's pocket so its walls never
+      // coincide with the ribs'. It is cut in 2D (where slivers can be cleaned up)
+      // and the plate is built as a full lower layer plus a grooved upper layer.
+      grooveDepth = extra > 0 ? Math.min(extra, stampThickness - MIN_STAMP_FLOOR) : 0;
+      stampTooThin = grooveDepth < extra;
+      let plateSolid;
+      if (grooveDepth > 0) {
+        // The odd 0.0137 keeps the groove edge from landing exactly on other edges.
+        const groove = mirror(keep(rim.offset(Math.max(stampClearance - 0.0137, 0.0063), "Round", 2, 48)));
+        // Shrinking the upper layer by a micron separates any spots where it only
+        // touches itself at a point, and keeps its walls off the lower layer's.
+        const upper = keep(keep(keep(plate.subtract(groove)).offset(-0.001, "Miter", 2)).simplify(SIMPLIFY));
+        const floor = stampThickness - grooveDepth;
+        const lowerSolid = keep(plate.extrude(floor));
+        // The upper layer starts inside the lower one so they share no faces.
+        const upperSolid = keep(keep(upper.extrude(grooveDepth + 0.2)).translate([0, 0, floor - 0.2]));
+        plateSolid = keep(lowerSolid.add(upperSolid));
+      } else {
+        plateSolid = keep(plate.extrude(stampThickness));
+      }
       const ribSolid = keep(keep(ribs.extrude(traceHeight + stampThickness / 2)).translate([0, 0, stampThickness / 2]));
       solid = keep(plateSolid.add(ribSolid));
       height = stampThickness + traceHeight;
     } else {
       const baseSolid = keep(base.extrude(baseThickness));
-      // Start the copper inside the plate so the union has no coplanar faces.
-      const copperSolid = keep(keep(raised.extrude(traceHeight + baseThickness / 2)).translate([0, 0, baseThickness / 2]));
-      solid = keep(baseSolid.add(copperSolid));
-      height = baseThickness + traceHeight;
+      // Start the raised parts inside the plate so the union has no coplanar faces.
+      const lift = (cs, h) => keep(keep(cs.extrude(h + baseThickness / 2)).translate([0, 0, baseThickness / 2]));
+      solid = keep(baseSolid.add(lift(copper, traceHeight)));
+      if (rim) solid = keep(solid.add(lift(rim, rimHeight)));
+      height = baseThickness + Math.max(traceHeight, rimHeight);
     }
 
     const m = solid.getMesh();
@@ -178,6 +206,7 @@ export function buildModel(wasm, dxf, opts) {
         shorts,
         padsRemoved,
         borderTrimmed,
+        stampTooThin,
         output,
         plateTop: output === "stamp" ? stampThickness : baseThickness,
         size: [width, depth, height],
